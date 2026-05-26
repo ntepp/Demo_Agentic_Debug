@@ -24,11 +24,14 @@ public class ReportingEngine {
     private static final Logger log = LoggerFactory.getLogger(ReportingEngine.class);
 
     private final FinancialAmountCalculator calculator;
+    private final RiskCalculatorService     riskCalculator;
     private final FinancialOrderRepository  orderRepository;
 
     public ReportingEngine(FinancialAmountCalculator calculator,
+                           RiskCalculatorService riskCalculator,
                            FinancialOrderRepository orderRepository) {
         this.calculator      = calculator;
+        this.riskCalculator  = riskCalculator;
         this.orderRepository = orderRepository;
     }
 
@@ -89,6 +92,14 @@ public class ReportingEngine {
                 success, failed.size(), total);
         if (!failed.isEmpty()) {
             log.error("Batch cycle ended with {} FAILED orders: {}", failed.size(), failed);
+        }
+
+        // Append portfolio risk metrics to the batch summary
+        try {
+            String riskSummary = riskCalculator.computeBatchRiskMetrics(orders);
+            log.info("Risk metrics: {}", riskSummary);
+        } catch (ArithmeticException e) {
+            log.error("Risk metrics computation failed — {}", e.getMessage(), e);
         }
 
         return new BatchReport(success, failed, total);
