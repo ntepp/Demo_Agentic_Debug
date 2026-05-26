@@ -1,0 +1,110 @@
+name: CI — Build & Test
+
+on:
+  push:
+    branches: [ "main", "fix/**", "feat/**" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-and-test:
+    name: Build & Test (Java 25)
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: financialdb
+          POSTGRES_USER: finuser
+          POSTGRES_PASSWORD: finpass
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U finuser -d financialdb"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          java-version: '25'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Build
+        working-directory: order-service
+        run: mvn -B clean compile --no-transfer-progress
+
+      - name: Test
+        working-directory: order-service
+        run: mvn -B test --no-transfer-progress
+        env:
+          SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/financialdb
+          SPRING_DATASOURCE_USERNAME: finuser
+          SPRING_DATASOURCE_PASSWORD: finpass
+
+      - name: Package (skip tests — already ran)
+        working-directory: order-service
+        run: mvn -B package -DskipTests --no-transfer-progress
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: surefire-reports
+          path: order-service/target/surefire-reports/
+          retention-days: 7
+
+      - name: Upload JAR
+        uses: actions/upload-artifact@v4
+        with:
+          name: order-service-jar
+          path: order-service/target/*.jar
+          retention-days: 7
+
+  # This job will turn RED until TTP-2847 is fixed.
+  # It exists to prove the regression test catches the bug in CI.
+  regression-gate:
+    name: Regression Gate (TTP-2847)
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          java-version: '25'
+          distribution: 'temurin'
+          cache: maven
+
+      - name: Run regression test only
+        working-directory: order-service
+        run: |
+          mvn -B test \
+            -Dtest="FinancialAmountCalculatorTest#shouldHandleMissingCurrency" \
+            --no-transfer-progress \
+            -Dsurefire.failIfNoSpecifiedTests=false
+        env:
+          SPRING_DATASOURCE_URL: jdbc:h2:mem:testdb
+
+      - name: Comment on PR if regression passes
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '✅ **Regression gate passed** — `shouldHandleMissingCurrency()` confirms TTP-2847 is fixed.'
+            })
