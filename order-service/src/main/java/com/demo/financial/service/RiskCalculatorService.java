@@ -9,6 +9,7 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -24,12 +25,6 @@ import java.util.stream.Collectors;
  *
  * <p>These metrics are informational — they do not affect the reported amounts.
  * They are logged at INFO level and included in the batch summary.
- *
- * <p><b>Known issue — KAN-2:</b> {@link #computeConcentrationRatio} calls
- * {@code BigDecimal.ONE.divide(weight)} without specifying a scale or rounding mode.
- * For non-terminating decimal results (e.g. 1 ÷ 0.35 = 2.857142…) this throws
- * {@link ArithmeticException}. Affects any portfolio whose allocationWeight does
- * not produce a finite decimal quotient when inverted.
  */
 @Service
 public class RiskCalculatorService {
@@ -67,17 +62,12 @@ public class RiskCalculatorService {
             // Measures how concentrated this portfolio is relative to the total allocation.
             // Higher value = more concentrated = higher risk.
             //
-            // ⚠  BUG (KAN-2): divide() called without scale or RoundingMode.
-            //    For weights that produce a non-terminating decimal quotient
-            //    (e.g. 1 ÷ 0.35 = 2.857142857…, 1 ÷ 0.45 = 2.222…),
-            //    BigDecimal throws ArithmeticException at runtime.
-            //
-            //    Fix: BigDecimal.ONE.divide(weight, METRIC_SCALE, RoundingMode.HALF_UP)
-            //
-            // TODO(KAN-2): add scale + RoundingMode to this divide call
+            // KAN-2: always specify scale + RoundingMode on divide() — weights like 0.35 or 0.45
+            // produce non-terminating decimal quotients (1÷0.35 = 2.857142…) that BigDecimal
+            // cannot represent exactly without a scale, causing ArithmeticException at runtime.
             BigDecimal weight = portfolio.getAllocationWeight() != null
                     ? portfolio.getAllocationWeight() : BigDecimal.ONE;
-            BigDecimal concentrationRatio = BigDecimal.ONE.divide(weight); // ← ArithmeticException
+            BigDecimal concentrationRatio = BigDecimal.ONE.divide(weight, METRIC_SCALE, RoundingMode.HALF_UP);
 
             long traderCount = portfolioOrders.stream()
                     .map(FinancialOrder::getTraderId)
@@ -90,7 +80,9 @@ public class RiskCalculatorService {
             log.info("Risk metrics portfolio={} concentration={} exposure={} traders={}",
                     portfolioId, concentrationRatio, exposureIndex, traderCount);
 
-            summary.append(String.format("[%s] concentration=%.4f exposure=%.2f traders=%d | ",
+            // Use Locale.US to ensure consistent decimal separators (.) regardless of JVM locale.
+            // Financial metric output must be locale-independent.
+            summary.append(String.format(Locale.US, "[%s] concentration=%.4f exposure=%.2f traders=%d | ",
                     portfolioId, concentrationRatio, exposureIndex, traderCount));
         }
 
