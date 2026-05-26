@@ -25,13 +25,16 @@ public class ReportingEngine {
 
     private final FinancialAmountCalculator calculator;
     private final RiskCalculatorService     riskCalculator;
+    private final TraderAuditService        traderAuditService;
     private final FinancialOrderRepository  orderRepository;
 
     public ReportingEngine(FinancialAmountCalculator calculator,
                            RiskCalculatorService riskCalculator,
+                           TraderAuditService traderAuditService,
                            FinancialOrderRepository orderRepository) {
-        this.calculator      = calculator;
-        this.riskCalculator  = riskCalculator;
+        this.calculator         = calculator;
+        this.riskCalculator     = riskCalculator;
+        this.traderAuditService = traderAuditService;
         this.orderRepository = orderRepository;
     }
 
@@ -100,6 +103,13 @@ public class ReportingEngine {
             log.info("Risk metrics: {}", riskSummary);
         } catch (ArithmeticException e) {
             log.error("Risk metrics computation failed — {}", e.getMessage(), e);
+        }
+
+        // Generate trader audit summary for the legacy audit system
+        try {
+            traderAuditService.generateAuditSummary(orders);
+        } catch (NumberFormatException e) {
+            log.error("Trader audit failed — invalid trader ID format: {}", e.getMessage(), e);
         }
 
         return new BatchReport(success, failed, total);

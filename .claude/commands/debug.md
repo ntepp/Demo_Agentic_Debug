@@ -13,240 +13,179 @@ Example: `/debug KAN-1`
 ## Overview
 
 ```
-PHASE 1 — ANALYSIS      (steps 1–4)  gather context: Jira, Confluence, logs, code
+PHASE 1 — ANALYSIS   (steps 1–4)   read Jira, Confluence, logs, code
           ⬇
-    ┌──────────────────────────────────────┐
-    │  PLAN PRESENTED — wait for go/no-go │  ← nothing is changed before this
-    └──────────────────────────────────────┘
-          ⬇  (approved)
-PHASE 2 — EXECUTION     (steps 5–8)  Jira → In Progress, fix, test, commit, comment
+    ════════════════════════════════════════
+      HARD STOP — output plan, end turn
+      wait for user message to continue
+    ════════════════════════════════════════
+          ⬇  user replies: go / yes / proceed
+PHASE 2 — EXECUTION  (steps 5–8)   Jira → In Progress, fix, test, commit
           ⬇
-    ┌──────────────────────────────────────┐
-    │  FUNCTIONAL TEST GATE               │  ← user tests the fix in the running app
-    └──────────────────────────────────────┘
-          ⬇  (user confirms: tests pass)
-PHASE 3 — CLOSE         (step 9)     Jira → Done
+    ════════════════════════════════════════
+      HARD STOP — output test instructions
+      wait for user message to continue
+    ════════════════════════════════════════
+          ⬇  user replies: done / tests pass / ok
+PHASE 3 — CLOSE      (step 9)      Jira → Done
 ```
-
-**Rules:**
-- Do not modify any file or ticket before the plan is approved.
-- Do not close the ticket before the user confirms functional tests pass.
 
 ---
 
 ## PHASE 1 — Analysis
 
+Run all four steps without modifying anything. No file edits, no tool writes, no Jira transitions.
+
 ### Step 1 — Read the Jira ticket
 
-Call `get_issue($ARGUMENTS)` to fetch the full ticket.
+Call `get_issue($ARGUMENTS)`.
 
-Extract:
-- **Error type** (exception class, error message)
-- **Affected service / component**
-- **Any stack trace or log snippet** in the description
-- **Priority and reported impact**
-
-> The ticket drives everything. Do not assume the error type before reading it.
-
----
+Extract: error type, affected component, stack trace if present, priority, impact.
 
 ### Step 2 — Read the architecture documentation
 
-Search Confluence for documentation related to the **affected component** from Step 1.
-
-Extract:
-- Component responsibilities
-- Known constraints or migration debt
-- Incident history (previous similar failures)
-
----
+Search Confluence for the affected component. Extract: responsibilities, known constraints, legacy debt, incident history.
 
 ### Step 3 — Search the application logs
 
-Search logs for the **exact exception class and/or affected class** found in Steps 1–2.
+Search for the exception class and affected class from Steps 1–2.
 
-Capture:
-- Full stack trace with **file name and line number**
-- Timestamp and frequency (recurring or one-off?)
-- Which data triggered the error (order ID, portfolio ID, etc.)
-- Surrounding log lines for context
-
-> Every subsequent step is driven by the actual line number from the logs — never by assumptions.
-
----
+Capture: full stack trace with **exact file name and line number**, frequency, which data triggered the error, surrounding context.
 
 ### Step 4 — Locate and read the defective code
 
-Open the **exact file and line number** from the stack trace.
+Open the exact file and line from the stack trace. Read ±40 lines of context plus TODO/FIXME comments.
 
-Read:
-- The failing line and ±40 lines of surrounding context
-- Any TODO/FIXME/BUG comments near the defective line
-- The method signature and its callers
-
-Identify:
-- Which expression is null / what invariant is violated
-- Why the condition is possible (design gap, missing guard, etc.)
-- Whether this is already a known issue
+Identify: what is null/wrong, why it can happen, whether it is a known issue.
 
 ---
 
-## ⛔ VALIDATION GATE — Present the plan and wait for approval
+## ════ HARD STOP — VALIDATION GATE ════
 
-After Steps 1–4, **stop and present the plan below. Do not proceed until the user approves.**
-
----
-
-### PLAN: `<JIRA-ID>` — `<ticket title>`
-
-**🔍 Root cause**
-> One sentence: what is null/wrong, in which method, and why it can happen.
-
-**📍 Location**
-> `ClassName.java:LINE` — `methodName()`
-
-**💥 Impact**
-> How many orders/requests are affected, since when, and whether it is recurring.
-
-**🔧 Proposed fix**
-> Plain-language description of the code change.
-
-**🧪 Regression test**
-> Class and method name that will be created, and what scenario it covers.
-
-**📝 Commit message preview**
-```
-fix(<scope>): <summary>
-
-- <change 1>
-- <regression test added>
-
-Closes <JIRA-ID>
-```
+**After Step 4: output the plan below, then END YOUR TURN.**
+**Do not call any tool (Edit, Write, Bash, MCP) after this block.**
+**Wait for the user's next message before doing anything.**
 
 ---
 
-**Waiting for your approval. Reply `yes` / `go` / `proceed`, or give feedback to adjust.**
+## 📋 PLAN — `<JIRA-ID>` · `<ticket title>`
+
+| | |
+|---|---|
+| 🔍 **Root cause** | _one sentence: what is wrong, where, and why_ |
+| 📍 **Location** | `ClassName.java:LINE` — `methodName()` |
+| 💥 **Impact** | _N orders/portfolios affected, since when, recurring?_ |
+| 🔧 **Fix** | _plain-language description of the code change_ |
+| 🧪 **Test** | `<FailingClass>Test#shouldHandle<X>()` |
+| 📝 **Commit** | `fix(<scope>): <summary> — Closes <JIRA-ID>` |
+| ⚡ **Jira** | current status → **In Progress** (first action after approval) |
 
 ---
 
-## PHASE 2 — Execution *(only after approval)*
+> ⏸ **Waiting for your approval.**
+> Reply **`go`** to proceed with implementation, or describe what to adjust.
 
-### Step 5 — Move Jira to In Progress
-
-**First action after approval — before touching any code.**
-
-Call `transition_issue(<JIRA-ID>, "In Progress")`.
-
-This signals that work has started and makes the fix traceable in the audit trail.
+_(End of turn — do not continue until the user replies.)_
 
 ---
+
+## PHASE 2 — Execution *(starts only when user replies go / yes / proceed)*
+
+### Step 5 — Jira → In Progress
+
+**This is the very first action. Before touching any code.**
+
+`transition_issue(<JIRA-ID>, "In Progress")`
 
 ### Step 6 — Apply the fix
 
-Edit only the defective section. Rules:
-- Do not change method signatures (other callers may exist)
-- Prefer `Optional` for nullable domain objects
-- Add an inline comment referencing the Jira ticket number on the changed line
-- Preserve all existing log statements
-
----
+Edit only the defective line/section.
+- Do not change method signatures
+- Prefer `Optional` for nullable objects
+- Add inline comment: `// Fixed: <JIRA-ID>`
+- Keep all existing log statements
 
 ### Step 7 — Generate the regression test
 
-**Derive the test from what was found in Steps 3–4 — not from a template.**
+Derive from what was found — never from a fixed template.
 
-Determine:
-- Which class to test (`<FailingClass>Test`)
-- Which method to test (the one from the stack trace)
-- What input triggers the bug (the exact null/bad value from the logs)
-- What the correct behaviour should be after the fix
+- Class: `<FailingClass>Test` (always matches the class in the stack trace)
+- Method 1: `shouldHandle<MissingThing>()` — reproduces the exact failure
+- Method 2: `should<Expected>When<Condition>()` — happy path after fix
+- Path: `src/test/java/<same package>/<FailingClass>Test.java`
 
-Create at: `src/test/java/<package>/<FailingClass>Test.java`
+### Step 8 — Commit message + Jira comment
 
-The test must:
-1. Reproduce the exact failure scenario (regression — `assertDoesNotThrow` or equivalent)
-2. Verify the fix produces the expected result (happy path)
-
-Use JUnit 5. Naming: `shouldHandle<MissingThing>()` for the regression, `should<Expected>When<Condition>()` for the happy path.
-
-> Always match the failing class: bug in `RiskCalculatorService` → `RiskCalculatorServiceTest`.
-
----
-
-### Step 8 — Prepare and present the commit message
-
-Format as Conventional Commit:
+Present the ready-to-use commit message:
 
 ```
 fix(<scope>): <what was fixed>
 
-- <what changed in production code>
-- <regression test: ClassName#methodName()>
+- <production code change>
+- Added <FailingClass>Test#shouldHandle<X>() regression test
 
 Closes <JIRA-ID>
 ```
 
-Post this commit message ready to copy. Also add a comment on the Jira ticket:
-`add_comment(<JIRA-ID>, "Fix applied: <root cause one-liner>. Regression test added: <TestClass>#<method>. Awaiting functional validation.")`
+Post on the ticket: `add_comment(<JIRA-ID>, "Fix applied: <root cause>. Test added: <TestClass>#<method>. Pending functional validation.")`
 
 ---
 
-## ⏸ FUNCTIONAL TEST GATE — Ask the user to validate in the running app
+## ════ HARD STOP — FUNCTIONAL TEST GATE ════
 
-After Step 8, **stop and present the following testing instructions. Do not close the ticket yet.**
+**After Step 8: output the instructions below, then END YOUR TURN.**
+**Do not call transition_issue or any other tool after this block.**
+**Wait for the user's next message before closing the ticket.**
 
 ---
 
-### 🧪 Please run functional tests before we close `<JIRA-ID>`
+## 🧪 Please validate the fix before we close `<JIRA-ID>`
 
-**Start the application** (if not already running):
-```bash
-# Local (H2, no Docker needed)
+**1. Start the app (if not running):**
+```powershell
 $env:JAVA_HOME = "D:\app\jdk-25.0.3"
 cd order-service
 mvn spring-boot:run
-
-# Or full stack with Docker
-./scripts/start-demo.sh
 ```
+Or full stack: `./scripts/start-demo.sh`
 
-**Trigger the scenario that was failing:**
+**2. Trigger the failing scenario:**
 ```bash
-# Manually trigger one batch cycle
+# Trigger one batch cycle
 curl -X POST http://localhost:8080/api/orders/batch-report
 
-# Check that previously failing orders/portfolios now succeed
+# Check the previously failing orders/portfolios now succeed
 curl http://localhost:8080/api/orders/failed
-
-# Confirm no more errors in logs for the affected class
-# (look for the exception that was in the stack trace)
 ```
 
-**Run the regression test:**
-```bash
+**3. Run the regression test:**
+```powershell
 $env:JAVA_HOME = "D:\app\jdk-25.0.3"
 mvn test -Dtest="<FailingClass>Test" -f order-service/pom.xml
 ```
 
-> Once all checks pass, reply **`done`** / **`tests pass`** / **`ok`** and I will close the Jira ticket.
+> ⏸ **Reply `done` / `tests pass` / `ok` when all checks are green.**
+> I will then close the Jira ticket.
+
+_(End of turn — do not close the ticket until the user replies.)_
 
 ---
 
-## PHASE 3 — Close *(only after user confirms functional tests pass)*
+## PHASE 3 — Close *(starts only when user replies done / tests pass / ok)*
 
-### Step 9 — Close the Jira ticket
+### Step 9 — Jira → Done
 
-1. `transition_issue(<JIRA-ID>, "Done")` — mark as resolved
-2. `add_comment(<JIRA-ID>, "Functional tests confirmed by developer. Ticket closed.")` — final audit trail entry
+1. `transition_issue(<JIRA-ID>, "Done")`
+2. `add_comment(<JIRA-ID>, "Functional tests confirmed. Ticket closed.")`
 
 ---
 
-## What makes this workflow adaptive
+## Key rules summary
 
-- Steps 1–3 discover the actual error, class, and line number from live data — never hardcoded
-- The **plan gate** ensures no code is changed without explicit approval
-- Jira moves to **In Progress immediately** when work starts, not at the end
-- Step 7 generates tests specific to the actual failing class
-- The **functional test gate** prevents closing a ticket on code alone — the fix must be validated in a running app
-- Jira moves to **Done only after human confirmation** — Claude never self-approves closure
+| Rule | Detail |
+|---|---|
+| No tool calls before plan approval | Phase 1 is read-only |
+| Jira → In Progress is the FIRST action | Before any code change |
+| Gate = end of turn | Not a soft suggestion — Claude stops and waits |
+| Tests must be class-specific | Always derived from the stack trace, never hardcoded |
+| Jira → Done requires human confirmation | Claude never self-approves closure |
