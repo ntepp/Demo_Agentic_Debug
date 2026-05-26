@@ -10,6 +10,7 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Computes EUR-normalised, risk-adjusted, regulatory-buffered amounts
@@ -138,8 +139,12 @@ public class FinancialAmountCalculator {
         //    Workaround: none — migration TTP-2841 must complete first
         //
         log.debug("Fetching settlement currency for portfolio id={}", portfolio.getId());
-        BigDecimal settlementMultiplier =
-                order.getPortfolio().getCurrency().getAmount();     // ← NPE
+        // KAN-1: portfolio.getCurrency() is null for FinCore v1 legacy portfolios.
+        // BigDecimal.ONE is the neutral multiplier — preserves the buffered amount
+        // until TTP-2841 migration populates the currency field for all portfolios.
+        BigDecimal settlementMultiplier = Optional.ofNullable(portfolio.getCurrency())
+                .map(Currency::getAmount)
+                .orElse(BigDecimal.ONE);
 
         BigDecimal result = buffered.multiply(settlementMultiplier)
                 .setScale(REPORT_SCALE, RoundingMode.HALF_UP);
